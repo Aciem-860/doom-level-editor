@@ -19,18 +19,33 @@ Vector2 mouse_position = { 0 };
 // X AND Y OFFSETS
 int vert_line_offset = 0;
 int horz_line_offset = 0;
+int nb_tiles = 10;
+int tile_width;
 
 CREATE_DYNAMIC_ARRAY(Vector2);
 
 DynamicArray_Vector2 balls = { 0 };
 
-static void draw_grid() {
-    static int nb_tiles = 10;
-    
+static float distance2(Vector2 *p1, Vector2 *p2) {
+    Vector2 d = {
+        .x = p2->x - p1->x,
+        .y = p2->y - p1->y
+    };
+    return d.x * d.x + d.y * d.y;
+}
+
+static int is_in_screen(Vector2 *point) {
+    return !(point->x < 0
+             || point->x > MAIN_SCREEN_WIDTH
+             || point->y < 0
+             || point->y > SCREEN_HEIGHT);
+}
+
+static void draw_grid(void) {
     static double mouse_prev_x = 0;
     static double mouse_prev_y = 0;
     
-    int tile_width = MAIN_SCREEN_WIDTH / nb_tiles;
+    tile_width = MAIN_SCREEN_WIDTH / nb_tiles;
 
     if (IsKeyPressed(KEY_A)) {
         nb_tiles += ZOOM_LEVEL;
@@ -103,9 +118,10 @@ int main(void)
 
             if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
                 // POSITION IN REAL-WORLD
-                Vector2 ball;
-                ball.x = mouse_position.x - vert_line_offset;
-                ball.y = mouse_position.y - horz_line_offset;
+                Vector2 ball = {
+                    .x = mouse_position.x - vert_line_offset,
+                    .y = mouse_position.y - horz_line_offset
+                };
 
                 da_append(&balls, ball);
             }
@@ -118,6 +134,39 @@ int main(void)
                     DrawCircle((int) ball->x + vert_line_offset, (int) ball->y + horz_line_offset, 5.0f, RED);
                 }
             }
+
+            // RENDERING POTENTIAL BALL (COLOUR GREEN)
+            {
+                int ms_ix = (int) mouse_position.x - vert_line_offset;
+                int ms_iy = (int) mouse_position.y - horz_line_offset;
+
+                int corner_x;
+                int corner_y;
+                
+                if (ms_ix < 0) {
+                    corner_x = ms_ix % tile_width < -tile_width/2 ? -1 : 0;
+                } else {
+                    corner_x = ms_ix % tile_width > tile_width/2;
+                }
+                
+                if (ms_iy < 0) {
+                    corner_y = ms_iy % tile_width < -tile_width/2 ? -1 : 0;
+                } else {
+                    corner_y = ms_iy % tile_width > tile_width/2;
+                }
+                
+                Vector2 potential_ball = {
+                    .x = tile_width * (corner_x + ms_ix / tile_width) + vert_line_offset,
+                    .y = tile_width * (corner_y + ms_iy / tile_width) + horz_line_offset
+                };
+
+                if (is_in_screen(&potential_ball) && distance2(&potential_ball, &mouse_position) < tile_width*tile_width/5) {
+                    DrawCircle((int) potential_ball.x,
+                               (int) potential_ball.y,
+                               5.0f, GREEN);
+                }
+            }
+            
 
             DrawFPS(10, 10);
         }
