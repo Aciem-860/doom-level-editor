@@ -9,8 +9,8 @@ const int SCREEN_WIDTH = 1080;
 const int SCREEN_HEIGHT = 720;
 const int ZOOM_LEVEL = 10;
 
-const double SIDE_MENU_RATIO =
-    1.0 / 3.0; // The side menu occupies 1/3 of the screen width (right-sided)
+ // The side menu occupies 1/3 of the screen width (right-sided)
+const double SIDE_MENU_RATIO = 1.0 / 3.0;
 const double MAIN_SCREEN_WIDTH = SCREEN_WIDTH * (1 - SIDE_MENU_RATIO);
 const double SIDE_SCREEN_WIDTH = SCREEN_WIDTH * SIDE_MENU_RATIO;
 
@@ -26,7 +26,8 @@ CREATE_DYNAMIC_ARRAY(Vector2);
 
 DynamicArray_Vector2 balls = { 0 };
 
-static float distance2(Vector2 *p1, Vector2 *p2) {
+static float vector_distance2(Vector2 *p1, Vector2 *p2)
+{
     Vector2 d = {
         .x = p2->x - p1->x,
         .y = p2->y - p1->y
@@ -34,14 +35,29 @@ static float distance2(Vector2 *p1, Vector2 *p2) {
     return d.x * d.x + d.y * d.y;
 }
 
-static int is_in_screen(Vector2 *point) {
+static float float_distance2(float x1, float y1, float x2, float y2)
+{
+    Vector2 v1 = {
+        .x = x1,
+        .y = y1
+    };
+    Vector2 v2 = {
+        .x = x2,
+        .y = y2
+    };
+    return vector_distance2(&v1, &v2);
+}
+
+static int is_in_screen(Vector2 *point)
+{
     return !(point->x < 0
              || point->x > MAIN_SCREEN_WIDTH
              || point->y < 0
              || point->y > SCREEN_HEIGHT);
 }
 
-static void draw_grid(void) {
+static void draw_grid(void)
+{
     static double mouse_prev_x = 0;
     static double mouse_prev_y = 0;
     
@@ -56,7 +72,6 @@ static void draw_grid(void) {
             nb_tiles -= ZOOM_LEVEL;
         }
     }
-
 
     for (int t = 0; t < nb_tiles; t++) {
         int line_pos = t * tile_width;
@@ -102,7 +117,6 @@ static void draw_grid(void) {
 
 int main(void)
 {
-    
     SetTraceLogLevel(LOG_NONE);
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "DOOM LEVEL EDITOR");
 
@@ -117,21 +131,32 @@ int main(void)
             draw_grid();
 
             if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
-                // POSITION IN REAL-WORLD
+                // POSITION IN REAL-WORLD (ms_ix, ms_iy)
+                int ms_ix = (int) mouse_position.x - vert_line_offset;
+                int ms_iy = (int) mouse_position.y - horz_line_offset;
+
+                int corner_x;
+                int corner_y;
+
+                if (ms_ix < 0) {
+                    corner_x = ms_ix % tile_width < -tile_width/2 ? -1 : 0;
+                } else {
+                    corner_x = ms_ix % tile_width > tile_width/2;
+                }
+
+                if (ms_iy < 0) {
+                    corner_y = ms_iy % tile_width < -tile_width/2 ? -1 : 0;
+                } else {
+                    corner_y = ms_iy % tile_width > tile_width/2;
+                }
+
                 Vector2 ball = {
-                    .x = mouse_position.x - vert_line_offset,
-                    .y = mouse_position.y - horz_line_offset
+                    .x = tile_width * (corner_x + ms_ix / tile_width),
+                    .y = tile_width * (corner_y + ms_iy / tile_width)
                 };
 
-                da_append(&balls, ball);
-            }
-
-
-            // RENDERING EVERY BALLS
-            for (int i = 0; i < balls.count; i++) {
-                Vector2 *ball = &(balls.values[i]);
-                if (ball->x > -vert_line_offset &&  ball->x < MAIN_SCREEN_WIDTH + -vert_line_offset) {
-                    DrawCircle((int) ball->x + vert_line_offset, (int) ball->y + horz_line_offset, 5.0f, RED);
+                if (float_distance2(ball.x + vert_line_offset, ball.y + horz_line_offset, mouse_position.x, mouse_position.y) < tile_width*tile_width/5) {
+                    da_append(&balls, ball);
                 }
             }
 
@@ -160,13 +185,26 @@ int main(void)
                     .y = tile_width * (corner_y + ms_iy / tile_width) + horz_line_offset
                 };
 
-                if (is_in_screen(&potential_ball) && distance2(&potential_ball, &mouse_position) < tile_width*tile_width/5) {
+                if (is_in_screen(&potential_ball) && vector_distance2(&potential_ball, &mouse_position) < tile_width*tile_width/5) {
                     DrawCircle((int) potential_ball.x,
                                (int) potential_ball.y,
                                5.0f, GREEN);
                 }
             }
-            
+
+            // RENDERING EVERY BALLS
+            for (int i = 0; i < balls.count; i++) {
+                Vector2 *ball = &(balls.values[i]);
+                Vector2 rendered_ball = {
+                    .x = (int) ball->x + vert_line_offset,
+                    .y = (int) ball->y + horz_line_offset
+                };
+                if (is_in_screen(&rendered_ball)) {
+                    DrawCircle(rendered_ball.x,
+                               rendered_ball.y,
+                               5.0f, RED);
+                }
+            }
 
             DrawFPS(10, 10);
         }
