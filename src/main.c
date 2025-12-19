@@ -5,16 +5,26 @@
 
 #include "dynamic_array.h"
 
+CREATE_DYNAMIC_ARRAY(Vector2);
+
+typedef enum Edit_Mode { NONE, SECTOR } Edit_Mode;
+
+typedef struct Sector {
+    DynamicArray_Vector2 anchors;
+} Sector; 
+
+const char *GUI_STYLE = "styles/style_candy.rgs";
 const int SCREEN_WIDTH = 1080;
 const int SCREEN_HEIGHT = 720;
 const int ZOOM_LEVEL = 10;
 
- // The side menu occupies 1/3 of the screen width (right-sided)
+// The side menu occupies 1/3 of the screen width (right-sided)
 const double SIDE_MENU_RATIO = 1.0 / 3.0;
 const double MAIN_SCREEN_WIDTH = SCREEN_WIDTH * (1 - SIDE_MENU_RATIO);
 const double SIDE_SCREEN_WIDTH = SCREEN_WIDTH * SIDE_MENU_RATIO;
 
-Vector2 mouse_position = { 0 };
+Vector2 mouse_position = {0};
+Edit_Mode edit_mode = NONE;
 
 // X AND Y OFFSETS
 int vert_line_offset = 0;
@@ -22,9 +32,7 @@ int horz_line_offset = 0;
 int nb_tiles = 10;
 int tile_width;
 
-CREATE_DYNAMIC_ARRAY(Vector2);
-
-DynamicArray_Vector2 balls = { 0 };
+DynamicArray_Vector2 sector_anchors = {0};
 
 static float vector_distance2(Vector2 *p1, Vector2 *p2)
 {
@@ -48,6 +56,16 @@ static float float_distance2(float x1, float y1, float x2, float y2)
     return vector_distance2(&v1, &v2);
 }
 
+static Vector2 vector2_offset(Vector2 v, Vector2 o)
+{
+    Vector2 ret = (Vector2) {
+        .x = v.x + o.x,
+        .y = v.y + o.y
+    };
+
+    return ret;
+}
+
 static int is_in_screen(Vector2 *point)
 {
     return !(point->x < 0
@@ -63,15 +81,15 @@ static void draw_grid(void)
     
     tile_width = MAIN_SCREEN_WIDTH / nb_tiles;
 
-    if (IsKeyPressed(KEY_A)) {
-        nb_tiles += ZOOM_LEVEL;
-    }
+    /* if (IsKeyPressed(KEY_A)) { */
+    /*     nb_tiles += ZOOM_LEVEL; */
+    /* } */
     
-    if (IsKeyPressed(KEY_Q)) {
-        if (nb_tiles - ZOOM_LEVEL > 0) {
-            nb_tiles -= ZOOM_LEVEL;
-        }
-    }
+    /* if (IsKeyPressed(KEY_Q)) { */
+    /*     if (nb_tiles - ZOOM_LEVEL > 0) { */
+    /*         nb_tiles -= ZOOM_LEVEL; */
+    /*     } */
+    /* } */
 
     for (int t = 0; t < nb_tiles; t++) {
         int line_pos = t * tile_width;
@@ -115,14 +133,110 @@ static void draw_grid(void)
 }
 
 
+static Vector2 get_point_on_the_grid(Vector2 position_on_screen) {
+    // POSITION IN REAL-WORLD (ms_ix, ms_iy)
+    int ms_ix = (int) position_on_screen.x - vert_line_offset;
+    int ms_iy = (int) position_on_screen.y - horz_line_offset;
+
+    int corner_x;
+    int corner_y;
+
+    if (ms_ix < 0) {
+        corner_x = ms_ix % tile_width < -tile_width/2 ? -1 : 0;
+    } else {
+        corner_x = ms_ix % tile_width > tile_width/2;
+    }
+
+    if (ms_iy < 0) {
+        corner_y = ms_iy % tile_width < -tile_width/2 ? -1 : 0;
+    } else {
+        corner_y = ms_iy % tile_width > tile_width/2;
+    }
+
+    Vector2 ball = {
+        .x = tile_width * (corner_x + ms_ix / tile_width),
+        .y = tile_width * (corner_y + ms_iy / tile_width)
+    };
+    
+    return ball;
+}
+
+static void fill_polygon(DynamicArray_Vector2 *anchors)
+{
+    if (anchors->count <= 0) return;
+
+    Vector2 offset = (Vector2) {
+        .x = vert_line_offset,
+        .y = horz_line_offset
+    };
+    
+    for (int i = 0; i < anchors->count-1; i++) {
+        DrawTriangle(vector2_offset(anchors->values[0], offset),
+                     vector2_offset(anchors->values[i], offset),
+                     vector2_offset(anchors->values[i+1], offset),
+                     Fade(ORANGE, 0.5f));
+    }
+}
+
+static void render_sector(DynamicArray_Vector2 *anchors)
+{
+    Vector2 prev_anchor = { 0 };
+    int prev_anchor_valid = 0;
+    for (int i = 0; i < sector_anchors.count; i++) {
+        Vector2 *anchor = &(sector_anchors.values[i]);
+        Vector2 rendered_anchor = {
+            .x = (int) anchor->x + vert_line_offset,
+            .y = (int) anchor->y + horz_line_offset
+        };
+
+        int cur_anchor_backup_x = rendered_anchor.x;
+        int cur_anchor_backup_y = rendered_anchor.y;
+        // Draw a segment joining two walls
+        if (prev_anchor_valid) {
+            
+            int prev_anchor_backup_x = prev_anchor.x;
+            int prev_anchor_backup_y = prev_anchor.y;
+            
+            if (prev_anchor.x > MAIN_SCREEN_WIDTH) {
+                double t = (MAIN_SCREEN_WIDTH - cur_anchor_backup_x) / (prev_anchor_backup_x - cur_anchor_backup_x);
+                prev_anchor.x = MAIN_SCREEN_WIDTH;
+                prev_anchor.y = cur_anchor_backup_y + t * (prev_anchor_backup_y - cur_anchor_backup_y);
+            }
+
+            if (rendered_anchor.x > MAIN_SCREEN_WIDTH) {
+                double t = (MAIN_SCREEN_WIDTH - cur_anchor_backup_x) / (prev_anchor_backup_x - cur_anchor_backup_x);
+                rendered_anchor.x = MAIN_SCREEN_WIDTH;
+                rendered_anchor.y = cur_anchor_backup_y + t * (prev_anchor_backup_y - cur_anchor_backup_y);
+            }
+
+            DrawLine(prev_anchor.x, prev_anchor.y, rendered_anchor.x, rendered_anchor.y, BLUE);
+        }
+                
+        rendered_anchor.x = cur_anchor_backup_x;
+        rendered_anchor.y = cur_anchor_backup_y;
+        
+        if (is_in_screen(&rendered_anchor)) {
+            DrawCircle(rendered_anchor.x,
+                       rendered_anchor.y,
+                       5.0f, RED);
+        }
+
+            
+        prev_anchor = rendered_anchor;
+        prev_anchor_valid = 1;
+    }
+    fill_polygon(anchors);
+}
+
 int main(void)
 {
     SetTraceLogLevel(LOG_NONE);
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "DOOM LEVEL EDITOR");
+    GuiLoadStyle(GUI_STYLE);
 
     SetTargetFPS(60);
 
-    while (!WindowShouldClose())    // Detect window close button or ESC key
+    while (!WindowShouldClose()) // Detect window close button or ESC key
     {
         BeginDrawing();
         {
@@ -130,89 +244,56 @@ int main(void)
             mouse_position = GetMousePosition();
             draw_grid();
 
-            if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
-                // POSITION IN REAL-WORLD (ms_ix, ms_iy)
-                int ms_ix = (int) mouse_position.x - vert_line_offset;
-                int ms_iy = (int) mouse_position.y - horz_line_offset;
+            if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && edit_mode == SECTOR) {
+                Vector2 anchor = get_point_on_the_grid(mouse_position);
 
-                int corner_x;
-                int corner_y;
-
-                if (ms_ix < 0) {
-                    corner_x = ms_ix % tile_width < -tile_width/2 ? -1 : 0;
-                } else {
-                    corner_x = ms_ix % tile_width > tile_width/2;
-                }
-
-                if (ms_iy < 0) {
-                    corner_y = ms_iy % tile_width < -tile_width/2 ? -1 : 0;
-                } else {
-                    corner_y = ms_iy % tile_width > tile_width/2;
-                }
-
-                Vector2 ball = {
-                    .x = tile_width * (corner_x + ms_ix / tile_width),
-                    .y = tile_width * (corner_y + ms_iy / tile_width)
-                };
-
-                if (float_distance2(ball.x + vert_line_offset, ball.y + horz_line_offset, mouse_position.x, mouse_position.y) < tile_width*tile_width/5) {
-                    da_append(&balls, ball);
+                if (float_distance2(anchor.x + vert_line_offset, anchor.y + horz_line_offset, mouse_position.x, mouse_position.y) < tile_width*tile_width/5) {
+                    da_append(&sector_anchors, anchor);
                 }
             }
 
             // RENDERING POTENTIAL BALL (COLOUR GREEN)
             {
-                int ms_ix = (int) mouse_position.x - vert_line_offset;
-                int ms_iy = (int) mouse_position.y - horz_line_offset;
+                Vector2 potential_anchor = get_point_on_the_grid(mouse_position);
+                potential_anchor.x += vert_line_offset;
+                potential_anchor.y += horz_line_offset;
 
-                int corner_x;
-                int corner_y;
-                
-                if (ms_ix < 0) {
-                    corner_x = ms_ix % tile_width < -tile_width/2 ? -1 : 0;
-                } else {
-                    corner_x = ms_ix % tile_width > tile_width/2;
-                }
-                
-                if (ms_iy < 0) {
-                    corner_y = ms_iy % tile_width < -tile_width/2 ? -1 : 0;
-                } else {
-                    corner_y = ms_iy % tile_width > tile_width/2;
-                }
-                
-                Vector2 potential_ball = {
-                    .x = tile_width * (corner_x + ms_ix / tile_width) + vert_line_offset,
-                    .y = tile_width * (corner_y + ms_iy / tile_width) + horz_line_offset
-                };
-
-                if (is_in_screen(&potential_ball) && vector_distance2(&potential_ball, &mouse_position) < tile_width*tile_width/5) {
-                    DrawCircle((int) potential_ball.x,
-                               (int) potential_ball.y,
+                if (is_in_screen(&potential_anchor) && vector_distance2(&potential_anchor, &mouse_position) < tile_width*tile_width/5) {
+                    DrawCircle((int) potential_anchor.x,
+                               (int) potential_anchor.y,
                                5.0f, GREEN);
                 }
             }
 
             // RENDERING EVERY BALLS
-            for (int i = 0; i < balls.count; i++) {
-                Vector2 *ball = &(balls.values[i]);
-                Vector2 rendered_ball = {
-                    .x = (int) ball->x + vert_line_offset,
-                    .y = (int) ball->y + horz_line_offset
-                };
-                if (is_in_screen(&rendered_ball)) {
-                    DrawCircle(rendered_ball.x,
-                               rendered_ball.y,
-                               5.0f, RED);
+            render_sector(&sector_anchors);
+
+            char mode_text[1024];
+            switch (edit_mode) {
+            case NONE:
+                if (GuiButton((Rectangle) { MAIN_SCREEN_WIDTH + 100, SCREEN_HEIGHT / 2, 200, 50 }, "AJOUTER UN SECTEUR")) {
+                    edit_mode = SECTOR;
                 }
+                sprintf(mode_text, "AUCUN MODE N'EST ACTIVÉ");
+                break;
+            case SECTOR:
+                if (GuiButton((Rectangle) { MAIN_SCREEN_WIDTH + 100, SCREEN_HEIGHT / 2, 200, 50 }, "ARRÊTER LE MODE D'ÉDITION")) {
+                    edit_mode = NONE;
+                }
+                sprintf(mode_text, "MODE: Ajouter un nouveau secteur");
+                break;
             }
 
+
+            GuiLabel((Rectangle){ MAIN_SCREEN_WIDTH + 100, 100, 200, 50 }, mode_text);
+            
             DrawFPS(10, 10);
         }
         EndDrawing();
     }
     CloseWindow();
 
-    da_free(&balls);
+    da_free(&sector_anchors);
 
     return 0;
 }
